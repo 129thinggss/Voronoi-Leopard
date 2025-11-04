@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Leopard Pattern Lab</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        --bg: #f5f2ec;
+        --text: #1e1e1e;
+        --muted: #7a766f;
+        --radius-lg: 1.4rem;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at top, #fdfbf8 0%, #f5f2ec 50%, #efe9dd 100%);
+        font-family: system-ui, -apple-system, sans-serif;
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+      header { padding: 1.4rem 1.6rem 0.4rem; }
+      header h1 { font-size: 1.1rem; margin: 0 0 .3rem; }
+      header p { margin: 0; color: var(--muted); font-size: .7rem; }
+      .app {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 1rem;
+        padding: 0 1rem 1rem;
+      }
+      .panel {
+        background: rgba(255,255,255,.8);
+        backdrop-filter: blur(6px);
+        border: 1px solid rgba(0,0,0,.03);
+        border-radius: var(--radius-lg);
+        padding: 1rem;
+        box-shadow: 0 20px 24px rgba(0,0,0,.02);
+      }
+      .panel-title { font-size: .6rem; text-transform: uppercase; color: #9e9586; margin-bottom: .5rem; }
+      .control { margin-bottom: .6rem; }
+      .control-row { display: flex; justify-content: space-between; align-items: center; }
+      .value-pill {
+        background: rgba(0,0,0,.05);
+        border-radius: 9999px;
+        padding: .1rem .5rem;
+        font-size: .6rem;
+      }
+      input[type="range"] { width: 100%; accent-color: #a88e6a; }
+      .actions { display: flex; gap: .4rem; margin-top: .8rem; }
+      button {
+        border: none; background: #1f1f1f; color: #fff;
+        font-size: .6rem; padding: .4rem .7rem; border-radius: .6rem;
+      }
+      .ghost { background: rgba(0,0,0,.04); color: #1f1f1f; }
+      .preview-wrap {
+        background: #fff; border-radius: var(--radius-lg);
+        border: 1px solid rgba(0,0,0,.03);
+        display: flex; justify-content: center; align-items: center;
+        box-shadow: 0 20px 24px rgba(0,0,0,.02);
+        overflow: hidden;
+        position: relative;
+      }
+      #canvas {
+        max-width: 100%;
+        height: auto;
+        background: #fff;
+        opacity: 0;
+        transition: opacity 0.7s ease-in-out;
+      }
+      #canvas.visible { opacity: 1; }
+      footer {
+        padding: .4rem 1rem 1rem;
+        font-size: .55rem; color: rgba(0,0,0,.35);
+      }
+      @media (max-width: 840px) { .app { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Leopard Pattern Lab</h1>
+      <p>Voronoi 기반 미니멀 호피 패턴 실험 툴 (실제 셀 간격 조절 가능)</p>
+    </header>
+
+    <main class="app">
+      <aside class="panel">
+        <div class="panel-title">Pattern Controls</div>
+
+        <div class="control"><div class="control-row"><label>셀 개수</label><span id="count-val" class="value-pill"></span></div><input id="count" type="range" min="5" max="140" value="70" /></div>
+        <div class="control"><div class="control-row"><label>모서리 둥글기</label><span id="round-val" class="value-pill"></span></div><input id="round" type="range" min="0" max="40" value="16" /></div>
+        <div class="control"><div class="control-row"><label>도넛 폭</label><span id="band-val" class="value-pill"></span></div><input id="band" type="range" min="5" max="35" value="18" /></div>
+        <div class="control"><div class="control-row"><label>Turbulence</label><span id="turb-val" class="value-pill"></span></div><input id="turb" type="range" min="0" max="50" value="10" /></div>
+        <div class="control"><div class="control-row"><label>Displace</label><span id="disp-val" class="value-pill"></span></div><input id="disp" type="range" min="0" max="40" value="10" /></div>
+        <div class="control"><div class="control-row"><label>셀 간격</label><span id="gap-val" class="value-pill"></span></div><input id="gap" type="range" min="-10" max="20" value="0" /></div>
+        <div class="control-row" style="margin-top:.3rem;"><label style="font-size:.6rem;"><input id="invert" type="checkbox" /> 색 반전</label></div>
+        <div class="actions"><button id="randomize">랜덤</button><button id="download" class="ghost">SVG 저장</button></div>
+      </aside>
+
+      <section class="preview-wrap">
+        <svg id="canvas" width="600" height="600"></svg>
+      </section>
+    </main>
+
+    <footer>
+      Leopard pattern prototype — adjust Voronoi cell gap (-10 ~ 20)
+    </footer>
+
+    <script>
+      const svg=document.getElementById("canvas");
+      const controls=["count","round","band","turb","disp","gap"];
+      const inputs=Object.fromEntries(controls.map(id=>[id,document.getElementById(id)]));
+      const labels=Object.fromEntries(controls.map(id=>[id,document.getElementById(id+"-val")]));
+      const invert=document.getElementById("invert");
+      const randomBtn=document.getElementById("randomize");
+      const downloadBtn=document.getElementById("download");
+      const W=600,H=600; let seed=Math.random();
+
+      const rnd=()=> (seed=(seed*9301+49297)%233280)/233280;
+      const centroid=p=>p.reduce(([x,y],[px,py])=>[x+px,y+py],[0,0]).map(v=>v/p.length);
+      const insetPolygon=(poly,dist)=>{
+        const c=centroid(poly);
+        return poly.map(([x,y])=>{
+          const dx=x-c[0],dy=y-c[1];
+          return [x - dx*dist, y - dy*dist];
+        });
+      };
+      const lineIntersect=(p1,p2,a,b,c)=>{const[x1,y1]=p1,[x2,y2]=p2,dx=x2-x1,dy=y2-y1,den=a*dx+b*dy;if(Math.abs(den)<1e-6)return null;const t=-(a*x1+b*y1+c)/den;return[x1+t*dx,y1+t*dy]};
+      const clipPolygon=(poly,a,b,c)=>{const o=[];for(let i=0;i<poly.length;i++){const p1=poly[i],p2=poly[(i+1)%poly.length],d1=a*p1[0]+b*p1[1]+c,d2=a*p2[0]+b*p2[1]+c,in1=d1>=0,in2=d2>=0;if(in1&&in2)o.push(p2);else if(in1&&!in2){const inter=lineIntersect(p1,p2,a,b,c);if(inter)o.push(inter);}else if(!in1&&in2){const inter=lineIntersect(p1,p2,a,b,c);if(inter)o.push(inter);o.push(p2);}}return o};
+      const makeRoundedPath=(pts,r)=>{if(!pts.length)return"";let d="";for(let i=0;i<pts.length;i++){const p0=pts[(i-1+pts.length)%pts.length],p1=pts[i],p2=pts[(i+1)%pts.length];const v1=[p1[0]-p0[0],p1[1]-p0[1]],v2=[p2[0]-p1[0],p2[1]-p1[1]];const l1=Math.hypot(...v1),l2=Math.hypot(...v2),r1=Math.min(r,l1/2),r2=Math.min(r,l2/2);const p1a=[p1[0]-(v1[0]/l1)*r1,p1[1]-(v1[1]/l1)*r1],p1b=[p1[0]+(v2[0]/l2)*r2,p1[1]+(v2[1]/l2)*r2];if(!i)d+=`M${p1a[0]},${p1a[1]} `;else d+=`L${p1a[0]},${p1a[1]} `;d+=`Q${p1[0]},${p1[1]} ${p1b[0]},${p1b[1]} `;}return d+"Z"};
+      function updateLabels(){for(const id of controls)labels[id].textContent=inputs[id].value;}
+
+      function draw(){
+        svg.classList.remove("visible");
+        setTimeout(()=>{
+          updateLabels();
+          svg.innerHTML="";
+          const defs=document.createElementNS("http://www.w3.org/2000/svg","defs");
+          svg.appendChild(defs);
+
+          const filter=document.createElementNS("http://www.w3.org/2000/svg","filter");
+          filter.id="noise";
+          const feT=document.createElementNS("http://www.w3.org/2000/svg","feTurbulence");
+          feT.setAttribute("type","fractalNoise");
+          feT.setAttribute("baseFrequency",(inputs.turb.value/1000).toFixed(3));
+          feT.setAttribute("numOctaves","2");
+          const feD=document.createElementNS("http://www.w3.org/2000/svg","feDisplacementMap");
+          feD.setAttribute("in","SourceGraphic");
+          feD.setAttribute("scale",inputs.disp.value);
+          feD.setAttribute("xChannelSelector","R");
+          feD.setAttribute("yChannelSelector","G");
+          filter.append(feT,feD);
+          defs.appendChild(filter);
+          svg.style.background=invert.checked?"#000":"#fff";
+
+          const n=+inputs.count.value,roundness=+inputs.round.value,bandSlider=+inputs.band.value,gap=+inputs.gap.value;
+          const pts=Array.from({length:n},()=>[rnd()*W,rnd()*H]);
+
+          for(let i=0;i<n;i++){
+            let cell=[[0,0],[W,0],[W,H],[0,H]],pi=pts[i];
+            for(let j=0;j<n;j++){if(i===j)continue;const pj=pts[j];let a=pj[0]-pi[0],b=pj[1]-pi[1],mx=(pi[0]+pj[0])/2,my=(pi[1]+pj[1])/2,c=-(a*mx+b*my);
+              if(a*pi[0]+b*pi[1]+c<0){a=-a;b=-b;c=-c;}
+              cell=clipPolygon(cell,a,b,c);
+              if(!cell.length)break;
+            }
+            if(!cell.length)continue;
+
+            // 💡 gap 적용 — 각 셀을 중심 쪽으로 inset 시켜서 여백 생성
+            const gapInset = gap / 200;
+            cell = insetPolygon(cell, gapInset);
+
+            const outerRatio=0.22,innerRatio=Math.min(outerRatio+bandSlider/100,0.9);
+            const polyO=insetPolygon(cell,outerRatio),polyI=insetPolygon(cell,innerRatio);
+            const dO=makeRoundedPath(polyO,roundness*0.5),dI=makeRoundedPath(polyI,roundness*0.35);
+
+            const patId=`tex-${i}`,pat=document.createElementNS("http://www.w3.org/2000/svg","pattern");
+            pat.id=patId;pat.setAttribute("patternUnits","userSpaceOnUse");pat.setAttribute("width",W);pat.setAttribute("height",H);
+            const img=document.createElementNS("http://www.w3.org/2000/svg","image");
+            img.setAttributeNS("http://www.w3.org/1999/xlink","href","texture.png");
+            img.setAttribute("width",W);img.setAttribute("height",H);
+            const angle=Math.floor(rnd()*360),scale=0.5+rnd()*0.7,tx=-rnd()*80,ty=-rnd()*80;
+            pat.setAttribute("patternTransform",`translate(${tx} ${ty}) rotate(${angle} ${W/2} ${H/2}) scale(${scale})`);
+            pat.appendChild(img);defs.appendChild(pat);
+
+            const donut=document.createElementNS("http://www.w3.org/2000/svg","path");
+            donut.setAttribute("d",`${dO} ${dI}`);
+            donut.setAttribute("fill",`url(#${patId})`);
+            donut.setAttribute("fill-rule","evenodd");
+            donut.setAttribute("filter","url(#noise)");
+            svg.appendChild(donut);
+          }
+          requestAnimationFrame(()=>svg.classList.add("visible"));
+        },100);
+      }
+
+      controls.forEach(id=>inputs[id].addEventListener("input",draw));
+      invert.addEventListener("input",draw);
+      randomBtn.addEventListener("click",()=>{seed=Math.random();draw();});
+      downloadBtn.addEventListener("click",()=>{
+        const blob=new Blob([new XMLSerializer().serializeToString(svg)],{type:"image/svg+xml"});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url; a.download="leopard_pattern.svg"; a.click();
+      });
+
+      draw();
+    </script>
+  </body>
+</html>
